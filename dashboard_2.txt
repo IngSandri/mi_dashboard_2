@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard de Calles – Villa María</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- DataTables -->
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css"/>
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #f4f4f4;
+}
+header {
+    background: #003366;
+    color: white;
+    padding: 20px;
+    text-align: center;
+}
+#dashboard {
+    width: 90%;
+    margin: auto;
+    padding: 20px;
+}
+.kpis {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.kpi-card {
+    flex: 1;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+#map {
+    height: 500px;
+    margin-bottom: 30px;
+    border-radius: 10px;
+}
+</style>
+
+</head>
+<body>
+
+<header>
+    <h1>Red Vial de Villa María – Dashboard Interactivo</h1>
+    <p>Análisis geoespacial y estadístico de las calles descargadas desde OpenStreetMap</p>
+</header>
+
+<div id="dashboard">
+
+    <!-- KPIs -->
+    <div class="kpis">
+        <div class="kpi-card">
+            <h2 id="kpi_total_calles">–</h2>
+            <p>Total de calles</p>
+        </div>
+        <div class="kpi-card">
+            <h2 id="kpi_longitud_total">–</h2>
+            <p>Longitud total (km)</p>
+        </div>
+        <div class="kpi-card">
+            <h2 id="kpi_sentido_unico">–</h2>
+            <p>Calles de sentido único</p>
+        </div>
+    </div>
+
+    <!-- Filtros -->
+    <h2>Filtros</h2>
+    <label>Tipo de vía:</label>
+    <select id="filtro_tipo_via">
+        <option value="todos">Todos</option>
+    </select>
+
+    <hr>
+
+    <!-- Mapa -->
+    <h2>Mapa Interactivo</h2>
+    <div id="map"></div>
+
+    <!-- Gráfico -->
+    <h2>Cantidad de calles por tipo de vía</h2>
+    <canvas id="grafico_tipos"></canvas>
+
+    <!-- Tabla -->
+    <h2>Tabla de Calles</h2>
+    <table id="tabla_calles" class="display" style="width:100%">
+        <thead>
+            <tr>
+                <th>Calle</th>
+                <th>Tipo de vía</th>
+                <th>Longitud (m)</th>
+                <th>Sentido único</th>
+            </tr>
+        </thead>
+    </table>
+
+</div>
+
+<script>
+// Cargar archivo GeoJSON
+fetch("calles_villamaria.geojson")
+.then(r => r.json())
+.then(data => {
+
+    // ---- MAPA ----
+    var map = L.map('map').setView([-32.41, -63.25], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    var capaCalles = L.geoJSON(data, {
+        style: f => ({ color: "#0066cc", weight: 2 }),
+        onEachFeature: function (feature, layer) {
+            layer.bindPopup("<b>" + (feature.properties.calle || "Sin nombre") + "</b><br>" +
+                            "Tipo de vía: " + feature.properties.tipo_via + "<br>" +
+                            "Longitud: " + feature.properties.longitud_metros.toFixed(1) + " m");
+        }
+    }).addTo(map);
+
+    map.fitBounds(capaCalles.getBounds());
+
+    // ---- KPIs ----
+    const calles = data.features;
+
+    document.getElementById("kpi_total_calles").textContent = calles.length;
+
+    const totalLongitud = calles.reduce((acc, f) => acc + f.properties.longitud_metros, 0) / 1000;
+    document.getElementById("kpi_longitud_total").textContent = totalLongitud.toFixed(1);
+
+    const sentidoUnico = calles.filter(f => f.properties.sentido_unico === true).length;
+    document.getElementById("kpi_sentido_unico").textContent = sentidoUnico;
+
+    // ---- Filtro de tipo de vía ----
+    const tipos = [...new Set(calles.map(f => f.properties.tipo_via))].sort();
+    const selectTipo = document.getElementById("filtro_tipo_via");
+
+    tipos.forEach(t => {
+        const opt = document.createElement("option");
+        opt.value = t;
+        opt.textContent = t;
+        selectTipo.appendChild(opt);
+    });
+
+    selectTipo.addEventListener("change", e => {
+        const tipo = e.target.value;
+
+        capaCalles.clearLayers();
+
+        L.geoJSON(data, {
+            filter: f => tipo === "todos" || f.properties.tipo_via === tipo,
+            style: f => ({ color: "#0066cc", weight: 2 })
+        }).addTo(map);
+    });
+
+    // ---- Gráfico de tipos ----
+    const conteoTipos = tipos.map(
+        t => calles.filter(f => f.properties.tipo_via === t).length
+    );
+
+    new Chart(document.getElementById("grafico_tipos"), {
+        type: 'bar',
+        data: {
+            labels: tipos,
+            datasets: [{
+                label: 'Cantidad de calles',
+                data: conteoTipos
+            }]
+        }
+    });
+
+    // ---- Tabla ----
+    $('#tabla_calles').DataTable({
+        data: calles.map(f => [
+            f.properties.calle,
+            f.properties.tipo_via,
+            f.properties.longitud_metros.toFixed(1),
+            f.properties.sentido_unico ? "Sí" : "No"
+        ]),
+    });
+
+});
+</script>
+
+</body>
+</html>
